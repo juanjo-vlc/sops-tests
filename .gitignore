@@ -1,0 +1,11 @@
+# Don't commit unencrypted secrets
+manifests/test-secret.yaml
+
+# Keep the encrypted version
+!encrypted/*.enc.yaml
+
+# Temporary files
+*.swp
+*.swo
+*~
+.DS_Store
