@@ -9,7 +9,7 @@ spec:
   source:
     repoURL: https://github.com/juanjo-vlc/sops-tests.git
     targetRevision: main  # or master, depending on your default branch
-    path: encrypted  # Path to encrypted manifests
+    path: .  # Path to root directory where kustomization.yaml is located
 
   destination:
     server: https://kubernetes.default.svc
