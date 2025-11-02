@@ -241,6 +241,195 @@ kubectl delete secret test-sops-secret
 kubectl delete configmap test-sops-configmap
 ```
 
+## Managing Secrets
+
+### Editing Encrypted Secrets
+
+#### Adding or Modifying Secret Values
+
+SOPS provides an editor that automatically decrypts, allows editing, and re-encrypts the file:
+
+```bash
+# Edit an encrypted file in your default editor
+sops encrypted/test-secret.enc.yaml
+
+# Use a specific editor
+EDITOR=vim sops encrypted/test-secret.enc.yaml
+```
+
+When you save and exit, SOPS automatically re-encrypts the file with the same keys.
+
+#### Adding a New Key/Value to a Secret
+
+**Method 1: Using SOPS Editor** (Recommended)
+
+```bash
+# Open the encrypted file for editing
+sops encrypted/test-secret.enc.yaml
+
+# In the editor, add your new key under stringData:
+# stringData:
+#   username: admin
+#   password: supersecretpassword123
+#   database-url: postgresql://user:pass@localhost:5432/mydb
+#   api-key: sk-1234567890abcdef
+#   new-key: new-secret-value  # <-- Add this line
+
+# Save and exit - SOPS will re-encrypt automatically
+```
+
+**Method 2: Update Plain Secret and Re-encrypt**
+
+```bash
+# 1. Edit the plain secret file
+vim manifests/test-secret.yaml
+
+# 2. Add your new key under stringData:
+# stringData:
+#   username: admin
+#   password: supersecretpassword123
+#   database-url: postgresql://user:pass@localhost:5432/mydb
+#   api-key: sk-1234567890abcdef
+#   new-key: new-secret-value  # <-- Add this
+
+# 3. Re-encrypt the entire file
+sops --encrypt manifests/test-secret.yaml > encrypted/test-secret.enc.yaml
+
+# 4. Commit and push
+git add encrypted/test-secret.enc.yaml manifests/test-secret.yaml
+git commit -m "Add new secret key"
+git push
+```
+
+**Method 3: Using `sops set` (For Single Values)**
+
+```bash
+# Set a specific value in an encrypted file
+sops --set '["stringData"]["new-key"] "new-secret-value"' encrypted/test-secret.enc.yaml
+
+# This modifies the file in place
+```
+
+#### Removing a Key/Value from a Secret
+
+```bash
+# Method 1: Use SOPS editor
+sops encrypted/test-secret.enc.yaml
+# Delete the line you want to remove, save and exit
+
+# Method 2: Update plain secret and re-encrypt
+vim manifests/test-secret.yaml  # Remove the key
+sops --encrypt manifests/test-secret.yaml > encrypted/test-secret.enc.yaml
+```
+
+#### Viewing Secret Values
+
+```bash
+# Decrypt and view the entire secret
+sops -d encrypted/test-secret.enc.yaml
+
+# Extract a specific value
+sops -d --extract '["stringData"]["username"]' encrypted/test-secret.enc.yaml
+
+# View in JSON format
+sops -d --output-type json encrypted/test-secret.enc.yaml
+```
+
+### Managing Encryption Keys
+
+#### Adding a New GPG Key to Existing Encrypted Secrets
+
+You can add or remove GPG keys from encrypted files **without decrypting them** using SOPS key rotation. This is useful for team member onboarding/offboarding.
+
+#### Add a New Key
+
+```bash
+# Add a new GPG key (by fingerprint) to an encrypted file
+sops --rotate --add-pgp 1234567890ABCDEF encrypted/test-secret.enc.yaml
+
+# Or add multiple keys at once
+sops --rotate --add-pgp "1234567890ABCDEF,FEDCBA0987654321" encrypted/test-secret.enc.yaml
+```
+
+#### Remove a Key
+
+```bash
+# Remove a GPG key from an encrypted file
+sops --rotate --rm-pgp 1234567890ABCDEF encrypted/test-secret.enc.yaml
+```
+
+#### Update All Files with New Keys
+
+If you've updated `.sops.yaml` with new keys, rotate all encrypted files to match:
+
+```bash
+# Update .sops.yaml first with new key configuration
+# Then rotate the encrypted file to use the new configuration
+sops updatekeys encrypted/test-secret.enc.yaml
+
+# Or rotate all encrypted files in a directory
+find encrypted/ -name "*.enc.yaml" -exec sops updatekeys {} \;
+```
+
+#### Example: Team Member Onboarding
+
+When a new team member joins and needs access to secrets:
+
+```bash
+# 1. They generate a GPG key and share their public key fingerprint
+# 2. You add their key to .sops.yaml
+echo "  - pgp: >-
+      41DB93BCEEA30326,  # Your key
+      NEW_TEAM_MEMBER_KEY  # New member's key" >> .sops.yaml
+
+# 3. Update all encrypted files
+sops updatekeys encrypted/test-secret.enc.yaml
+
+# 4. Commit and push
+git add .sops.yaml encrypted/test-secret.enc.yaml
+git commit -m "Add new team member GPG key"
+git push
+```
+
+#### Example: Team Member Offboarding
+
+When removing access:
+
+```bash
+# 1. Remove their key from .sops.yaml
+# 2. Rotate to remove their access
+sops --rotate --rm-pgp REMOVED_MEMBER_KEY encrypted/test-secret.enc.yaml
+
+# 3. Or use updatekeys if you've already updated .sops.yaml
+sops updatekeys encrypted/test-secret.enc.yaml
+
+# 4. Commit and push
+git add .sops.yaml encrypted/test-secret.enc.yaml
+git commit -m "Remove departed team member GPG key"
+git push
+```
+
+### Viewing Current Keys
+
+To see which keys can decrypt a file:
+
+```bash
+# Show metadata including all authorized keys
+sops --show-metadata encrypted/test-secret.enc.yaml
+
+# Extract just the PGP fingerprints
+sops --show-metadata encrypted/test-secret.enc.yaml | grep "fp:"
+```
+
+### Important Notes on Key Management
+
+- **Key rotation does NOT decrypt the file** - SOPS re-encrypts the data key with the new set of keys
+- **You need at least one valid key** to perform rotation (your current key must be able to decrypt)
+- **Update ArgoCD** - After adding/removing keys, update the `sops-gpg` secret in ArgoCD if the main key changes
+- **Backup keys** - Always maintain secure backups of GPG private keys
+- **Regular rotation** - Consider rotating keys periodically as a security best practice
+- **SOPS uses envelope encryption**: The actual data is encrypted with a data key, which is then encrypted with your GPG/age keys. This allows key rotation without re-encrypting the entire file.
+
 ## Additional Resources
 
 - [SOPS Documentation](https://github.com/mozilla/sops)
